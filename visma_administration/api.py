@@ -7,7 +7,7 @@ from os import sys
 from winreg import HKEY_LOCAL_MACHINE, OpenKey, QueryValueEx
 
 import clr
-from System import Boolean, Double, String
+from System import Boolean, Double, String, DateTime
 
 # Load the C# DLL
 with OpenKey(
@@ -231,28 +231,74 @@ class _Pdata(object):
         type = self.get_type(key)
         default_arguments = (self.data, getattr(self.api, key.upper()))
 
-        # TODO: Implement more types
         if type == self.api.ADK_FIELD_TYPE.eChar:
-            return self.api.AdkGetStr(*default_arguments, String(""))
+            return self.api.AdkGetStr(*default_arguments, String(""))[1]
         elif type == self.api.ADK_FIELD_TYPE.eDouble:
-            return self.api.AdkGetDouble(*default_arguments, Double(0.0))
+            return self.api.AdkGetDouble(*default_arguments, Double(0.0))[1]
         elif type == self.api.ADK_FIELD_TYPE.eBool:
-            return self.api.AdkGetBool(*default_arguments, Boolean(0))
+            return self.api.AdkGetBool(*default_arguments, Boolean(0))[1]
+        elif type == self.api.ADK_FIELD_TYPE.eDate:
+            return self.api.AdkGetDate(*default_arguments, DateTime())[1]
 
     def __setattr__(self, key, value):
         if key.upper() not in VismaAPI.fields_for_db_field(self.db_name):
             raise AttributeError("Trying to access field that doesn't exist")
 
-        type = self.get_type(key)
+        # Make sure user assigns correct type to the field
+        _type = self.get_type(key)
+        if not self.assignment_types_are_equal(_type, value):
+            raise Exception(f"Trying to assign incorrect type to {key}")
+
         default_arguments = (self.data, getattr(self.api, key.upper()))
 
-        # TODO: Implement more types
-        if type == self.api.ADK_FIELD_TYPE.eChar:
-            self.api.AdkSetStr(*default_arguments, String(f"{value}"))
-        elif type == self.api.ADK_FIELD_TYPE.eDouble:
-            self.api.AdkGetDouble(*default_arguments, Double(value))
-        elif type == self.api.ADK_FIELD_TYPE.eBool:
-            self.api.AdkGetBool(*default_arguments, Boolean(int(value)))
+        error = None
+        if _type == self.api.ADK_FIELD_TYPE.eChar:
+            error = self.api.AdkSetStr(*default_arguments, String(f"{value}"))[0]
+        elif _type == self.api.ADK_FIELD_TYPE.eDouble:
+            error = self.api.AdkSetDouble(*default_arguments, Double(value))
+        elif _type == self.api.ADK_FIELD_TYPE.eBool:
+            error = self.api.AdkSetBool(*default_arguments, Boolean(value))
+        elif _type == self.api.ADK_FIELD_TYPE.eDate:
+            error = self.api.AdkSetDate(*default_arguments, self.to_date(value))
+
+        if error and error.lRc != self.api.ADKE_OK:
+            error_message = Api.AdkGetErrorText(
+                error, self.api.ADK_ERROR_TEXT_TYPE.elRc
+            )
+            raise Exception(error_message)
+
+    def assignment_types_are_equal(self, field_type, input_type):
+        """
+        Check if assignment value is of same type as field
+        For example:
+            supplier.adk_supplier_name = "hello"
+
+        adk_supplier_name is a string field and expects a string assignment
+        """
+        if field_type == self.api.ADK_FIELD_TYPE.eChar and isinstance(input_type, str):
+            return True
+        elif field_type == self.api.ADK_FIELD_TYPE.eDouble and isinstance(
+            input_type, (float, int)
+        ):
+            return True
+        elif field_type == self.api.ADK_FIELD_TYPE.eBool and isinstance(
+            input_type, bool
+        ):
+            return True
+        elif field_type == self.api.ADK_FIELD_TYPE.eDate and isinstance(
+            input_type, datetime.datetime
+        ):
+            return True
+
+        return False
+
+    def to_date(self, date):
+        """
+        Turn datetime object into a C# datetime object
+        """
+        return DateTime(
+            date.year, date.month, date.day, date.hour, date.minute, date.second
+        )
 
     def get_type(self, key):
         type = self.api.AdkGetType(

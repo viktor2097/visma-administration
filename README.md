@@ -5,6 +5,38 @@ pip install visma-administration
 
 It's a simple wrapper around the *AdkNet4Wrapper.dll*
 
+# Quick functionality preview
+
+```py
+from visma_administration import VismaAPI, Supplier
+from datetime import datetime
+
+# Remember to assign VismaAPI to a variable, because the DB connection gets closed when the instance gets destroyed
+visma = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
+
+# Retrieve a single supplier
+john = Supplier().get(ADK_SUPPLIER_NAME="John")
+
+# Print data about john
+print(john.adk_supplier_short_name)
+print(john.adk_supplier_credit_limit)
+
+# Assign new data to john
+john.adk_supplier_short_name = "JN"             # supports string assignments
+john.adk_supplier_autogiro = True               # supports boolean assignments
+john.adk_supplier_credit_limit = 50000          # supports float and int assignments
+john.adk_supplier_timestamp = datetime.now()    # supports date assignments
+john.save() # save to the database
+
+# Retrieve all suppliers that contain DE anywhere in its name - returns a generator so its memory safe
+# you can filter on any field as you like
+for supplier in Supplier().filter(ADK_SUPPLIER_NAME="*DE*"):
+    print(supplier.adk_supplier_name)
+
+```
+
+# How it works
+
 It lets you execute code from the .NET wrapper for Visma Administration 200/500/1000/2000, directly from Python.
 
 ```py
