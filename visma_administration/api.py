@@ -105,26 +105,6 @@ class VismaAPI:
         return fields
 
     @staticmethod
-    def fields_for_db_field(db_field):
-        """
-        Example valid db_field is ADK_DB_SUPPLIER ( last word being the keyword )
-
-        Fields of type ADK_DB_SUPPLIER are defined as ADK_SUPPLIER_FIELDNAME
-
-        Function returns a list of names of associated fields of type db_field
-        """
-
-        if db_field not in VismaAPI.db_fields():
-            logging.error(f"{db_field} is not listed as a db field in Adk.h")
-
-        fields = [
-            field
-            for field in Api.__dict__
-            if field.startswith("ADK_" + VismaAPI.field_without_db_prefix(db_field))
-        ]
-        return fields
-
-    @staticmethod
     def field_without_db_prefix(db_field):
         return db_field.replace("ADK_DB_", "")
 
@@ -149,17 +129,29 @@ class _DBField:
 
             Supplier().filter(A="a", B="b") # Only applies filtering on B
             # B must be a valid field on ADK_DB_SUPPLIER
-            
+
         """
         for field, filter_term in kwargs.items():
-            if field not in VismaAPI.fields_for_db_field(self.__class__.DB_NAME):
-                raise Exception("Field not found.")
+            # Check if field exists
+            try:
+                self.api.AdkGetType(
+                    self.pdata.data,
+                    getattr(self.api, field),
+                    self.api.ADK_FIELD_TYPE.eUnused,
+                )
+            except AttributeError:
+                raise AttributeError(
+                    f"{field} is not a valid field of {self.__class__.DB_NAME}"
+                )
 
             error = self.api.AdkSetFilter(
                 self.pdata.data, getattr(self.api, field), filter_term, 0
             )
             if error.lRc != self.api.ADKE_OK:
                 raise InvalidFilter
+
+    def new(self):
+        return self.pdata
 
     def get(self, **kwargs):
         """
@@ -205,7 +197,7 @@ class _Pdata(object):
     Access and set fields like normal instance attributes
 
     Example:
-    
+
         # hello is an instance of Pdata which data is of type ADK_DB_SUPPLIER
         hello = Supplier().get(ADK_SUPPLIER_NAME="hello")
 
@@ -216,7 +208,7 @@ class _Pdata(object):
         hello.adk_supplier_name = "hello1"
         hello.save()
 
-        
+
     """
 
     def __init__(self, db_name, pdata):
@@ -225,27 +217,28 @@ class _Pdata(object):
         object.__setattr__(self, "data", pdata)
 
     def __getattr__(self, key):
-        if key.upper() not in VismaAPI.fields_for_db_field(self.db_name):
-            raise AttributeError("Trying to access field that doesn't exist")
+        try:
+            _type = self.get_type(key)
+        except AttributeError:
+            raise AttributeError(f"{key} is not a valid field of {self.db_name}")
 
-        type = self.get_type(key)
         default_arguments = (self.data, getattr(self.api, key.upper()))
 
-        if type == self.api.ADK_FIELD_TYPE.eChar:
+        if _type == self.api.ADK_FIELD_TYPE.eChar:
             return self.api.AdkGetStr(*default_arguments, String(""))[1]
-        elif type == self.api.ADK_FIELD_TYPE.eDouble:
+        elif _type == self.api.ADK_FIELD_TYPE.eDouble:
             return self.api.AdkGetDouble(*default_arguments, Double(0.0))[1]
-        elif type == self.api.ADK_FIELD_TYPE.eBool:
+        elif _type == self.api.ADK_FIELD_TYPE.eBool:
             return self.api.AdkGetBool(*default_arguments, Boolean(0))[1]
-        elif type == self.api.ADK_FIELD_TYPE.eDate:
+        elif _type == self.api.ADK_FIELD_TYPE.eDate:
             return self.api.AdkGetDate(*default_arguments, DateTime())[1]
 
     def __setattr__(self, key, value):
-        if key.upper() not in VismaAPI.fields_for_db_field(self.db_name):
-            raise AttributeError("Trying to access field that doesn't exist")
+        try:
+            _type = self.get_type(key)
+        except AttributeError:
+            raise AttributeError(f"{key} is not a valid field of {self.db_name}")
 
-        # Make sure user assigns correct type to the field
-        _type = self.get_type(key)
         if not self.assignment_types_are_equal(_type, value):
             raise Exception(f"Trying to assign incorrect type to {key}")
 
@@ -311,6 +304,9 @@ class _Pdata(object):
 
     def delete(self):
         self.api.AdkDeleteRecord(self.data)
+
+    def create(self):
+        self.api.AdkAdd(self.data)
 
 
 # Look through fields defined on VismaAPI as ADK_DB_FIELDNAME

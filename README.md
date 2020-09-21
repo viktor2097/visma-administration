@@ -1,3 +1,4 @@
+
 # *What is Visma-administration?*
 ```
 pip install visma-administration
@@ -32,6 +33,18 @@ john.save() # save to the database
 # you can filter on any field as you like
 for supplier in Supplier().filter(ADK_SUPPLIER_NAME="*DE*"):
     print(supplier.adk_supplier_name)
+
+# Create a new record
+new_record = Supplier().new()
+new_record.adk_supplier_name = "Nvidia"
+new_record.create() # CALL THIS INSTEAD OF .SAVE()
+
+# Get 5 elements
+import itertools
+suppliers = Supplier().filter(ADK_SUPPLIER_NAME="*N*")
+suppliers = itertools.islice(suppliers, 5)
+for supplier in suppliers:
+	print(supplier.adk_supplier_name)
 
 ```
 
