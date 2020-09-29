@@ -1,5 +1,6 @@
 import logging
 import os
+from decimal import Decimal
 from collections import namedtuple
 from functools import partial
 from enum import Enum
@@ -271,7 +272,7 @@ class _Pdata(object):
         if field_type == self.api.ADK_FIELD_TYPE.eChar and isinstance(input_type, str):
             return True
         elif field_type == self.api.ADK_FIELD_TYPE.eDouble and isinstance(
-            input_type, (float, int)
+            input_type, (float, int, Decimal)
         ):
             return True
         elif field_type == self.api.ADK_FIELD_TYPE.eBool and isinstance(
