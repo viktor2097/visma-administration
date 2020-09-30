@@ -160,7 +160,7 @@ class _DBField:
         Returns a single object, or returns an exception.
         """
         self.set_filter(**kwargs)
-        error = self.api.AdkFirstEx(self.pdata.data, False)
+        error = self.api.AdkFirstEx(self.pdata.data, True)
         if error.lRc != self.api.ADKE_OK:
             error_message = Api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
@@ -184,7 +184,7 @@ class _DBField:
         # ) :
 
         while True:
-            error = self.api.AdkNextEx(self.pdata.data, False).lRc
+            error = self.api.AdkNextEx(self.pdata.data, True).lRc
             if error != self.api.ADKE_OK:
                 break
 
@@ -217,6 +217,9 @@ class _Pdata(object):
         object.__setattr__(self, "api", VismaAPI._API)
         object.__setattr__(self, "db_name", db_name)
         object.__setattr__(self, "data", pdata)
+        
+    def __del__(self):
+        self.api.AdkDeleteStruct(self.data)
 
     def __getattr__(self, key):
         try:
