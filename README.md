@@ -1,229 +1,149 @@
+# *Python Visma Administration*  
+Requires Python executable to be 32-bit to communicate with Visma API.  
+```  
+pip install visma-administration  
+```  
+  
+# Quick functionality overview  
+Seamless integration with Visma Administration through pythonnet and Vismas Adk4NetWrapper.dll  
+```py  
+from visma_administration import VismaAPI  
+from datetime import datetime  
+  
+# Initilize a connection with one or multiple companies  
+company_1 = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")  
+company_2 = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")  
+  
+# Retrieve a single supplier  
+john = company_1.supplier.get(adk_supplier_name="John")  
+  
+# Print data about john  
+print(john.adk_supplier_short_name)  
+print(john.adk_supplier_credit_limit)  
+  
+# Assign new data to john  
+john.adk_supplier_short_name = "JN"             # supports string assignments  
+john.adk_supplier_autogiro = True               # supports boolean assignments  
+john.adk_supplier_credit_limit = 50000          # supports float and int assignments  
+john.adk_supplier_timestamp = datetime.now()    # supports date assignments  
+john.save() # save to the database  
 
-# *What is Visma-administration?*
+# Delete a record
+john.delete()
+  
+# Retrieve all suppliers that contain DE anywhere in its name - returns a generator  
+for supplier in company_2.supplier.filter(adk_supplier_name="*DE*"):  
+ print(supplier.adk_supplier_name)
+ 
+# Create a new record  
+new_record = Supplier().new()  
+new_record.adk_supplier_name = "Nvidia"  
+new_record.create() # CALL THIS INSTEAD OF .SAVE()  
+  
+# Get 5 elements  
+import itertools  
+suppliers = company_1.supplier.filter(ADK_SUPPLIER_NAME="*N*")  
+suppliers = itertools.islice(suppliers, 5)  
+for supplier in suppliers:  
+ print(supplier.adk_supplier_name)  
+```  
+  
+# How it works  
+  
+The project tries to reduce a significant amount of boilerplate code to get working with Visma Administration.  
+  
+It makes boilerplate like this  
+  
+```py  
+... import C# libraries with pythonnet  
+  
+Api.AdkOpen2(common_path, company_path, username, password)  
+john = Api.AdkCreateData(visma.api.ADK_DB_SUPPLIER)  
+Api.AdkSetFilter(john, 1, "John", 0)  
+Api.AdkFirstEx(john, False)  
+from System import String  
+print(Api.AdkGetStr(john, Api.ADK_SUPPLIER_NAME, String("")))  
+Api.AdkSetStr(john, Api.ADK_SUPPLIER_NAME, String("NewName")  
+Api.AdkUpdate(john)  
+```  
+  
+Turn into  
+  
+```py  
+from visma_administration import VismaAPI  
+  
+visma = VismaAPI(common_path, company_path)  
+john = visma.supplier.get(adk_supplier_name="John")  
+print(john.adk_supplier_name)  
+john.adk_supplier_name = "New John"  
+john.save()  
+```  
+  
+In Visma's documentation you can find a list of DB_fields that you may access through their API.  
+For instance  
+```  
+ADK_DB_PROJECT  
+ADK_DB_ACCOUNT  
+ADK_DB_SUPPLIER 
+```  
+  
+You can access these fields directly from your instantiated VismaAPI object,   
+ADK_DB_ is removed and the name is lowercased.  
+  
+For example:  
+      
+```py  
+visma = VismaAPI(common_path, company_path)  
+visma.supplier  
+visma.account  
+visma.project  
+```  
+  
+These DB_Field attributes returns an object from which you can request data  
+  
+```py  
+visma.supplier.get()  # returns a single object or returns an error  
+visma.supplier.filter()  # returns multiple objects  
+visma.supplier.new()  # Gives you a new record  
 ```
-pip install visma-administration
-```
 
-It's a simple wrapper around the *AdkNet4Wrapper.dll*
-
-# Quick functionality preview
+Both `get` and `filter` accepts filtering on a field as argument.
+You pass the field name which you want to filter upon, and a valid filter expression ( Visma have documentation for this )
 
 ```py
-from visma_administration import VismaAPI, Supplier
-from datetime import datetime
-
-# Remember to assign VismaAPI to a variable, because the DB connection gets closed when the instance gets destroyed
-visma = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
-
-# Retrieve a single supplier
-john = Supplier().get(ADK_SUPPLIER_NAME="John")
-
-# Print data about john
-print(john.adk_supplier_short_name)
-print(john.adk_supplier_credit_limit)
-
-# Assign new data to john
-john.adk_supplier_short_name = "JN"             # supports string assignments
-john.adk_supplier_autogiro = True               # supports boolean assignments
-john.adk_supplier_credit_limit = 50000          # supports float and int assignments
-john.adk_supplier_timestamp = datetime.now()    # supports date assignments
-john.save() # save to the database
-
-# Retrieve all suppliers that contain DE anywhere in its name - returns a generator so its memory safe
-# you can filter on any field as you like
-for supplier in Supplier().filter(ADK_SUPPLIER_NAME="*DE*"):
-    print(supplier.adk_supplier_name)
-
-# Create a new record
-new_record = Supplier().new()
-new_record.adk_supplier_name = "Nvidia"
-new_record.create() # CALL THIS INSTEAD OF .SAVE()
-
-# Get 5 elements
-import itertools
-suppliers = Supplier().filter(ADK_SUPPLIER_NAME="*N*")
-suppliers = itertools.islice(suppliers, 5)
-for supplier in suppliers:
-	print(supplier.adk_supplier_name)
-
+"""
+This filters on the ADK_SUPPLIER_NAME field of ADK_DB_SUPPLIER
+*text* is a valid filter expression which returns a result with inc anywhere inside of the name
+Refer to Visma documentation for further information on how to form different types of filter expressions.
+"""
+result = visma.supplier.get(adk_supplier_name="*inc*")
 ```
 
-# How it works
-
-It lets you execute code from the .NET wrapper for Visma Administration 200/500/1000/2000, directly from Python.
-
+Consider whatever `get`, `filter` and `new` returns to be database record(s).
+These records have fields associated with them, if you check documentation for ADK_DB_SUPPLIER, you can find a whole bunch of fields associated with it.
+```
+ADK_SUPPLIER_FIRST
+ADK_SUPPLIER_NUMBER
+ADK_SUPPLIER_NAME
+ADK_SUPPLIER_SHORT_NAME
+... And a lot more
+```
+These fields are mainly used in two ways,
 ```py
-from visma_administration import VismaAPI
-
-# common_path and company_path are documented in the AdkOpen(CHAR* pszSystemPath, CHAR* pszFtgPath) function
-visma = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
-
-# Call functions like any C# code!
-pdata = visma.api.AdkCreateData(visma.api.ADK_DB_SUPPLIER)
-visma.api.AdkFirstEx(pdata, False)
-
-# AdkGetStr() takes a String out parameter, so we can import String from the System library,
-# and it will be saved to the variable supplier_name instead
-from System import String
-supplier_name = visma.api.AdkGetStr(pdata, visma.api.ADK_SUPPLIER_NAME, String(""))
-
+test = visma.supplier.get(adk_supplier_name="test")  # Used when filtering
+test.adk_supplier_name = "test1"  # Or used when interacting with a supplier record
 ```
+ 
+  
+## Additional information
+  
+[Documentation for the api can be found here](https://vismaspcs.se/support/utvecklarpaket-eget-bruk)  
+  
+*Visma has to be installed on the PC you import the package on. Either full client or integration client is fine.* 
 
-However, this is cumbersome, it's possible to use a simpler interface
-
-Classes for each `ADK_DB_FIELDNAME` is created dynamically (you can find them below in this README or more accurately from Adk.h from the documentation)
-
-Classes follow a naming convention of Fieldname
-```py
-# For example, ADK_DB_SUPPLIER is one class that is created dynamically and ready to be imported
-# Note that the class name is generated as a title version of the field name
-from visma_administration import VismaAPI, Supplier
-visma = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
-```
-
-ADK_DB_FILEDNAME have other fields associated with it! Again, you can find the entire list in Adk.h
-
-As an example, ADK_DB_SUPPLIER has among others these fields associated with it
-```c
-#define ADK_SUPPLIER_NAME                                        1              //eChar 
-#define ADK_SUPPLIER_SHORT_NAME                                  2              //eChar 
-```
-## .get()
-We can retrieve a single record with the .get() method of a DB class
-```py
-# We pass the field name to filter on, get retrieves the first record found or raises an exception if not able to get a record
-record = Supplier().get(ADK_SUPPLIER_NAME="*hello*")
-
-# You can now access fields like any attributes! (lowercased)
-print(record.adk_supplier_name) # output: hello world
-print(record.adk_supplier_short_name) # output: hw
-
-# You can even assign new data!
-record.adk_supplier_name = "hello world!"
-record.save() # call save to update the record to the database
-print(record.adk_supplier_name) # output: hello world!
-
-# You can delete the record too
-record.delete()
-```
-
-## .filter()
-filter is a python generator that returns multiple records
-
-```py
-# Updates multiple records
-for record in Supplier().filter(ADK_SUPPLIER_NAME="*hello*"):
-    record.adk_supplier_name = SOME_VALUE
-    record.save()
-```
-
-## Filtering
-
-To filter with **.get()** and **.filter()**, provide the field name to filter on and assign a filter expression to it.
-You can find documentation on how to construct filter expressions in the documentation
-```py
-Supplier().get(ADK_SUPPLIER_NAME="filter expression")
-```
-
-## Requirements
-
-[Documentation for the wrapper can be found here](https://vismaspcs.se/support/utvecklarpaket-eget-bruk)
-
-**Visma has to be installed on the PC you import the package on. Either full client or integration client is fine.**
-
-**visma-administration will automatically find the installation location of the api on your PC based on environment variables visma installation adds.**
-
-## ADK_DB_FIELDS
-```
-#define ADK_DB_CUSTOMER                                          0
-#define ADK_DB_ARTICLE                                           1
-#define ADK_DB_ORDER_HEAD                                        2
-#define ADK_DB_ORDER_ROW                                         3
-#define ADK_DB_OFFER_HEAD                                        4
-#define ADK_DB_OFFER_ROW                                         5
-#define ADK_DB_INVOICE_HEAD                                      6
-#define ADK_DB_INVOICE_ROW                                       7
-#define ADK_DB_SUPPLIER_INVOICE_HEAD                             8
-#define ADK_DB_SUPPLIER_INVOICE_ROW                              9
-#define ADK_DB_PROJECT                                          10
-#define ADK_DB_ACCOUNT                                          11
-#define ADK_DB_SUPPLIER                                         12
-#define ADK_DB_CODE_OF_TERMS_OF_DELIVERY                        13
-#define ADK_DB_CODE_OF_WAY_OF_DELIVERY                          14
-#define ADK_DB_CODE_OF_TERMS_OF_PAYMENT                         15
-#define ADK_DB_CODE_OF_LANGUAGE                                 16
-#define ADK_DB_CODE_OF_CURRENCY                                 17
-#define ADK_DB_CODE_OF_CUSTOMER_CATEGORY                        18
-#define ADK_DB_CODE_OF_DISTRICT                                 19
-#define ADK_DB_CODE_OF_SELLER                                   20
-#define ADK_DB_DISCOUNT_AGREEMENT                               21
-#define ADK_DB_CODE_OF_ARTICLE_GROUP                            22
-#define ADK_DB_CODE_OF_ARTICLE_ACCOUNT                          23
-#define ADK_DB_CODE_OF_UNIT                                     24
-#define ADK_DB_CODE_OF_PROFIT_CENTRE                            25
-#define ADK_DB_CODE_OF_PRICE_LIST                               26
-#define ADK_DB_PRM                                              27
-#define ADK_DB_INVENTORY_ARTICLE                                28
-#define ADK_DB_MANUAL_DELIVERY_IN                               29
-#define ADK_DB_MANUAL_DELIVERY_OUT                              30
-#define ADK_DB_DISPATCHER										31
-#define ADK_DB_BOOKING_HEAD										32
-#define ADK_DB_BOOKING_ROW										33
-#define ADK_DB_CODE_OF_CUSTOMER_DISCOUNT_ROW					34
-#define ADK_DB_CODE_OF_ARTICLE_PARCEL							35
-#define ADK_DB_CODE_OF_ARTICLE_NAME								36
-#define ADK_DB_PRICE											37
-#define ADK_DB_ARTICLE_PURCHASE_PRICE							38
-#define ADK_DB_CODE_OF_WAY_OF_PAYMENT							39
-#define ADK_DB_FREE_CATEGORY_1									40 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_2									41 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_3									42 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_4									43 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_5									44 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_6									45 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_7									46 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_8									47 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_9									48 //SPCS F�rening
-#define ADK_DB_FREE_CATEGORY_10									49 //SPCS F�rening
-#define ADK_DB_MEMBER                                           50 //SPCS F�rening
-#define ADK_DB_DELIVERY_NOTE_HEAD								51
-#define ADK_DB_DELIVERY_NOTE_ROW								52
-#define ADK_DB_PACKAGE_HEAD                                     53
-#define ADK_DB_PACKAGE_ROW                                      54
-#define ADK_DB_IMP_PACKAGE_HEAD                                 55
-#define ADK_DB_IMP_PACKAGE_ROW                                  56
-#define ADK_DB_DELIVERY_ADDRESS                                 57
-#define ADK_DB_PRM2												58
-#define ADK_DB_CODE_OF_YOUR_REF_CUSTOMER						59
-#define ADK_DB_CODE_OF_YOUR_REF_SUPPLIER						60
-#define ADK_DB_CODE_OF_COUNTRY_CODE								61
-#define ADK_DB_CUSTOMERPAYMENT									62
-#define ADK_DB_CODE_OF_ADJUSTMENT_CODE							63
-#define ADK_DB_SUPPLIERPAYMENT									64
-#define ADK_DB_VERIFICATION_HEAD								65
-#define ADK_DB_VERIFICATION_ROW									66
-#define ADK_DB_CODE_OF_BOOKINGYEAR								67
-#define ADK_DB_CODE_OF_DISCOUNT_CODE							68
-#define ADK_DB_CONTACT											69
-#define ADK_DB_CODE_OF_CONTACT_TITLES							70
-#define ADK_DB_CODE_OF_CONTACT_GROUPS							71
-#define ADK_DB_CODE_OF_CONTACT_GROUP_CONTACTS					72
-#define ADK_DB_TAX_REDUCTION									73
-#define ADK_DB_AGREEMENT_HEAD									74
-#define ADK_DB_AGREEMENT_ROW									75
-#define ADK_DB_TAX_REDUCTION_ORDER								76
-#define ADK_DB_TAX_REDUCTION_AVTAL								77
-#define ADK_DB_VERIFICATION_SERIES								78
-#define ADK_DB_BOOKKEEPINGHIST									79
-#define ADK_DB_PERIODIC_ADJUSTMENT								80
-#define ADK_DB_CUSTOMER_ARTICLE									81
-#define ADK_DB_ATTACHMENT_INFO									82
-#define ADK_DB_TAX_REDUCTION_TYPES								83
-#define ADK_DB_PRM3												84
-```
-
-## License
-
-[![License](http://img.shields.io/:license-mit-blue.svg?style=flat-square)](http://badges.mit-license.org)
-
+  
+## License  
+  
+[![License](http://img.shields.io/:license-mit-blue.svg?style=flat-square)](http://badges.mit-license.org)  
+  
 - **[MIT license](http://opensource.org/licenses/mit-license.php)**

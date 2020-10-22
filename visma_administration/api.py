@@ -1,10 +1,8 @@
+import datetime
 import logging
 import os
-import datetime
-from decimal import Decimal
 from collections import namedtuple
-from functools import partial
-from enum import Enum
+from decimal import Decimal
 from os import sys
 from winreg import HKEY_LOCAL_MACHINE, OpenKey, QueryValueEx
 
@@ -28,22 +26,21 @@ class InvalidFilter(Exception):
 
 class VismaAPI:
     """
-    Call VismaAPI to open connection with a database (visma company folder)
+    Opens a connection to Visma database
 
     Example:
-        VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
+        my_company = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
+
+    The class expects you to either provide username and password as keyword arguments upon instantiation,
+    or supply them through visma_username and visma_password environment variables
 
     The API may be accessed directly with the .api attribute,
     this property exposes the C# DLL and gives you access to all functionality
     defined in AdkNet4Wrapper.dll and Adk.h
-
-    Example:
-        VismaAPI().api.AdkSetFilter() # AdkSetFilter is a method of the dll.
     """
 
-    _API = None
-
     def __init__(self, *args, **kwargs):
+        self._api = None
         self.adk = str()
         self.common_path = str()
         self.company_path = str()
@@ -53,12 +50,27 @@ class VismaAPI:
             self.common_path = kwargs.pop("common_path", self.common_path)
             self.company_path = kwargs.pop("company_path", self.company_path)
 
-        # credentials for AdkOpen
-        login = self.get_login_credentials()
-        self.username = login.username
-        self.password = login.password
+        if "username" and "password" in kwargs:
+            self.username = kwargs.pop("username")
+            self.password = kwargs.pop("password")
+        else:
+            login = self.get_login_credentials()
+            self.username = login.username
+            self.password = login.password
 
-        self.__class__._API = self.api
+        self.available_fields = {
+            self.field_without_db_prefix(field).lower(): field
+            for field in self.db_fields()
+        }
+
+    def __getattr__(self, name):
+
+        if name in self.available_fields:
+            return type(
+                name.title(), (_DBField,), {"DB_NAME": self.available_fields[name]}
+            )(api=self.api)
+
+        raise AttributeError
 
     def __del__(self):
         self.api.AdkClose()
@@ -73,8 +85,8 @@ class VismaAPI:
 
     @property
     def api(self):
-        if self._API:
-            return self._API
+        if self._api:
+            return self._api
 
         error = Api.AdkOpen2(
             self.common_path, self.company_path, self.username, self.password
@@ -84,6 +96,7 @@ class VismaAPI:
             logging.error(error_message)
             sys.exit(1)
 
+        self._api = Api
         return Api
 
     @staticmethod
@@ -115,9 +128,10 @@ class _DBField:
 
     DB_NAME = None
 
-    def __init__(self):
-        self.api = VismaAPI._API
+    def __init__(self, api):
+        self.api = api
         self.pdata = _Pdata(
+            self.api,
             self.__class__.DB_NAME,
             self.api.AdkCreateData(getattr(self.api, self.DB_NAME)),
         )
@@ -130,11 +144,11 @@ class _DBField:
         Example:
 
             Supplier().filter(A="a", B="b") # Only applies filtering on B
-            # B must be a valid field on ADK_DB_SUPPLIER
+            # B must be a valid field of ADK_DB_SUPPLIER
 
         """
         for field, filter_term in kwargs.items():
-            # Check if field exists
+            field = field.upper()  # Fields in Visma are all uppercased
             try:
                 self.api.AdkGetType(
                     self.pdata.data,
@@ -179,10 +193,6 @@ class _DBField:
         except Exception:
             return
 
-        # while (
-        #    error := self.api.AdkNextEx(self.pdata.data, False).lRc == self.api.ADKE_OK
-        # ) :
-
         while True:
             error = self.api.AdkNextEx(self.pdata.data, True).lRc
             if error != self.api.ADKE_OK:
@@ -201,7 +211,7 @@ class _Pdata(object):
     Example:
 
         # hello is an instance of Pdata which data is of type ADK_DB_SUPPLIER
-        hello = Supplier().get(ADK_SUPPLIER_NAME="hello")
+        hello = visma.supplier.get(ADK_SUPPLIER_NAME="hello")
 
         # Access a field on hello
         hello.adk_supplier_name
@@ -209,15 +219,13 @@ class _Pdata(object):
         # Set a field on hello
         hello.adk_supplier_name = "hello1"
         hello.save()
-
-
     """
 
-    def __init__(self, db_name, pdata):
-        object.__setattr__(self, "api", VismaAPI._API)
+    def __init__(self, api, db_name, pdata):
+        object.__setattr__(self, "api", api)
         object.__setattr__(self, "db_name", db_name)
         object.__setattr__(self, "data", pdata)
-        
+
     def __del__(self):
         self.api.AdkDeleteStruct(self.data)
 
@@ -260,7 +268,7 @@ class _Pdata(object):
             error = self.api.AdkSetDate(*default_arguments, self.to_date(value))
 
         if error and error.lRc != self.api.ADKE_OK:
-            error_message = Api.AdkGetErrorText(
+            error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
             )
             raise Exception(error_message)
@@ -312,10 +320,3 @@ class _Pdata(object):
 
     def create(self):
         self.api.AdkAdd(self.data)
-
-
-# Look through fields defined on VismaAPI as ADK_DB_FIELDNAME
-# Dynamically create classes as Fieldname
-for db_field in VismaAPI.db_fields():
-    class_name = VismaAPI.field_without_db_prefix(db_field).title()
-    globals()[class_name] = type(class_name, (_DBField,), {"DB_NAME": db_field})
