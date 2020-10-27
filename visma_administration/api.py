@@ -178,7 +178,7 @@ class Visma:
 
     @staticmethod
     def field_without_db_prefix(db_field):
-        return db_field.lstrip("ADK_DB_")
+        return db_field.replace("ADK_DB_", "")
 
 
 class _DBField:
