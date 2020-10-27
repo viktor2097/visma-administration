@@ -1,15 +1,16 @@
-import datetime
+﻿import datetime
 import logging
 import os
+import time
 from collections import namedtuple
+from contextlib import contextmanager
 from decimal import Decimal
 from os import sys
 from winreg import HKEY_LOCAL_MACHINE, OpenKey, QueryValueEx
 
 import clr
-from System import Boolean, Double, String, DateTime
+from System import Boolean, DateTime, Double, String
 
-# Load the C# DLL
 with OpenKey(
     HKEY_LOCAL_MACHINE,
     "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\SpcsAdm.Exe",
@@ -19,52 +20,111 @@ with OpenKey(
 
 from AdkNet4Wrapper import Api
 
-
 class InvalidFilter(Exception):
     pass
 
 
-class VismaAPI:
+class Visma:
     """
-    Opens a connection to Visma database
+    Simple interface between Visma Administration and Python
 
     Example:
-        my_company = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")
+        # Add a company
+        Visma.add_company(
+            name="Business Inc",
+            common_path="Y:\\Gemensamma filer",
+            company_path="Y:\\Företag\\FTG10"
+        )
 
-    The class expects you to either provide username and password as keyword arguments upon instantiation,
-    or supply them through visma_username and visma_password environment variables
-
-    The API may be accessed directly with the .api attribute,
-    this property exposes the C# DLL and gives you access to all functionality
-    defined in AdkNet4Wrapper.dll and Adk.h
+        # This opens the company in Visma associated with Business Inc company name
+        # you defined earlier
+        with Visma.get_company_api("Business Inc") as api:
+            supplier = api.supplier.get(adk_supplier_name="supplier name")
     """
 
+    _active_company = None
+    active_sessions = 0
+    companies = {}
+
     def __init__(self, *args, **kwargs):
-        self._api = None
-        self.adk = str()
-        self.common_path = str()
-        self.company_path = str()
-        self.load_registry_keys()
-
-        if "common_path" in kwargs or "company_path" in kwargs:
-            self.common_path = kwargs.pop("common_path", self.common_path)
-            self.company_path = kwargs.pop("company_path", self.company_path)
-
-        if "username" and "password" in kwargs:
-            self.username = kwargs.pop("username")
-            self.password = kwargs.pop("password")
-        else:
-            login = self.get_login_credentials()
-            self.username = login.username
-            self.password = login.password
+        super().__init__()
+        self.company = kwargs["company"]
 
         self.available_fields = {
             self.field_without_db_prefix(field).lower(): field
             for field in self.db_fields()
         }
 
-    def __getattr__(self, name):
+    @classmethod
+    @contextmanager
+    def get_company_api(cls, name):
+        """
+        Yields an object for provided company name,
+        providing a simple api to read, update and delete records related to the company
 
+        Call Visma.add_company() before using this function,
+        If more than one company is configured, it waits for other
+        requests on a specific company to finish before yielding the object
+        """
+        if name not in cls.companies:
+            raise AttributeError("Company not found. Consider adding it first.")
+
+        instance = cls(company=cls.companies[name])
+        company = cls.companies[name]["company_path"]
+        try:
+            if cls._active_company == company:
+                cls.active_sessions += 1
+                yield instance
+            else:
+                if cls.wait_for(cls.no_active_sessions):
+                    cls.active_sessions += 1
+
+                    # Close previous company
+                    if cls._active_company:
+                        Api.AdkClose()
+
+                    instance.api  # calling this so it sets new active company
+                    yield instance
+                else:
+                    cls.active_sessions += 1
+                    raise TimeoutError("Took too long to obtain the company API.")
+        finally:
+            cls.active_sessions -= 1
+
+    @staticmethod
+    def wait_for(predicate, timeout=60):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.1)
+        return False
+
+    @classmethod
+    def no_active_sessions(cls):
+        if cls.active_sessions == 0:
+            return True
+        return False
+
+    @classmethod
+    def add_company(cls, name, common_path, company_path, username=None, password=None):
+        """
+        Adds a company to VismaAPI.companies
+        name of company can be used with get_company_api
+        """
+        if not username or not password:
+            login = cls.get_login_credentials()
+            username = login.username
+            password = login.password
+
+        cls.companies[name] = {
+            "common_path": common_path,
+            "company_path": company_path,
+            "username": username,
+            "password": password,
+        }
+
+    def __getattr__(self, name):
         if name in self.available_fields:
             return type(
                 name.title(), (_DBField,), {"DB_NAME": self.available_fields[name]}
@@ -72,31 +132,26 @@ class VismaAPI:
 
         raise AttributeError
 
-    def __del__(self):
-        self.api.AdkClose()
-
-    def load_registry_keys(self):
-        with OpenKey(
-            HKEY_LOCAL_MACHINE,
-            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\SpcsAdm.Exe",
-        ) as key:
-            self.common_path = QueryValueEx(key, "CommonFiles")[0]
-            self.company_path = QueryValueEx(key, "DefaultCompanyPath")[0]
-
     @property
     def api(self):
-        if self._api:
-            return self._api
+        if self.__class__._active_company == self.company["company_path"]:
+            return Api
+        else:
+            self.__class__._active_company = self.company["company_path"]
 
         error = Api.AdkOpen2(
-            self.common_path, self.company_path, self.username, self.password
+            self.company["common_path"],
+            self.company["company_path"],
+            self.company["username"],
+            self.company["password"],
         )
         if error.lRc != Api.ADKE_OK:
-            error_message = Api.AdkGetErrorText(error, Api.ADK_ERROR_TEXT_TYPE.elRc)
+            error_message = self._api.AdkGetErrorText(
+                error, Api.ADK_ERROR_TEXT_TYPE.elRc
+            )
             logging.error(error_message)
             sys.exit(1)
 
-        self._api = Api
         return Api
 
     @staticmethod
@@ -107,21 +162,23 @@ class VismaAPI:
             username = os.environ["visma_username"]
             password = os.environ["visma_password"]
         except KeyError:
-            logging.error("Set visma_username & visma_password environment variables")
+            logging.error(
+                "provide username and password upon class instantiation,"
+                "or set visma_username & visma_password environment variables"
+            )
             sys.exit(1)
         return Credentials(username=username, password=password)
 
-    @staticmethod
-    def db_fields():
+    def db_fields(self):
         """
         Returns db fields defined in the DLL and Adk.h
         """
-        fields = [field for field in Api.__dict__ if field.startswith("ADK_DB")]
+        fields = [field for field in self.api.__dict__ if field.startswith("ADK_DB")]
         return fields
 
     @staticmethod
     def field_without_db_prefix(db_field):
-        return db_field.replace("ADK_DB_", "")
+        return db_field.lstrip("ADK_DB_")
 
 
 class _DBField:
@@ -143,7 +200,7 @@ class _DBField:
 
         Example:
 
-            Supplier().filter(A="a", B="b") # Only applies filtering on B
+            supplier.filter(A="a", B="b") # Only applies filtering on B
             # B must be a valid field of ADK_DB_SUPPLIER
 
         """
@@ -171,12 +228,12 @@ class _DBField:
 
     def get(self, **kwargs):
         """
-        Returns a single object, or returns an exception.
+        Returns a single object, or raises an exception.
         """
         self.set_filter(**kwargs)
         error = self.api.AdkFirstEx(self.pdata.data, True)
         if error.lRc != self.api.ADKE_OK:
-            error_message = Api.AdkGetErrorText(
+            error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
             )
             raise Exception(error_message)

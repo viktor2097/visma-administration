@@ -5,80 +5,64 @@ pip install visma-administration
 ```  
   
 # Quick functionality overview  
-Seamless integration with Visma Administration through pythonnet and Vismas Adk4NetWrapper.dll  
+Easy integration with Visma Administration through pythonnet and Vismas Adk4NetWrapper.dll  
 ```py  
-from visma_administration import VismaAPI  
+from visma_administration import Visma  
 from datetime import datetime  
   
-# Initilize a connection with one or multiple companies  
-company_1 = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")  
-company_2 = VismaAPI(common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")  
-  
-# Retrieve a single supplier  
-john = company_1.supplier.get(adk_supplier_name="John")  
-  
-# Print data about john  
-print(john.adk_supplier_short_name)  
-print(john.adk_supplier_credit_limit)  
-  
-# Assign new data to john  
-john.adk_supplier_short_name = "JN"             # supports string assignments  
-john.adk_supplier_autogiro = True               # supports boolean assignments  
-john.adk_supplier_credit_limit = 50000          # supports float and int assignments  
-john.adk_supplier_timestamp = datetime.now()    # supports date assignments  
-john.save() # save to the database  
+# Add companies you would like to access
+# It's highly recommended to only use one company, which i'll explain why further down in the readme
+Visma.add_company(name="FTG9", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")  
+Visma.add_company(name="FTG10", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")  
 
-# Delete a record
-john.delete()
+# Gets API for FTG10 we added earlier
+with Visma.get_company_api("FTG10") as api:
+    # Retrieve a single supplier  
+    john = api.supplier.get(adk_supplier_name="John")  
+      
+    # Print data about john  
+    print(john.adk_supplier_short_name)  
+    print(john.adk_supplier_credit_limit)  
+      
+    # Assign new data to john  
+    john.adk_supplier_short_name = "JN"             # supports string assignments  
+    john.adk_supplier_autogiro = True               # supports boolean assignments  
+    john.adk_supplier_credit_limit = 50000          # supports float and int assignments  
+    john.adk_supplier_timestamp = datetime.now()    # supports date assignments  
+    john.save() # save to the database  
+    
+    # Delete a record
+    john.delete()
   
-# Retrieve all suppliers that contain DE anywhere in its name - returns a generator  
-for supplier in company_2.supplier.filter(adk_supplier_name="*DE*"):  
- print(supplier.adk_supplier_name)
- 
-# Create a new record  
-new_record = Supplier().new()  
-new_record.adk_supplier_name = "Nvidia"  
-new_record.create() # CALL THIS INSTEAD OF .SAVE()  
-  
-# Get 5 elements  
-import itertools  
-suppliers = company_1.supplier.filter(ADK_SUPPLIER_NAME="*N*")  
-suppliers = itertools.islice(suppliers, 5)  
-for supplier in suppliers:  
- print(supplier.adk_supplier_name)  
-```  
-  
-# How it works  
-  
-The project tries to reduce a significant amount of boilerplate code to get working with Visma Administration.  
-  
-It makes boilerplate like this  
-  
-```py  
-... import C# libraries with pythonnet  
-  
-Api.AdkOpen2(common_path, company_path, username, password)  
-john = Api.AdkCreateData(visma.api.ADK_DB_SUPPLIER)  
-Api.AdkSetFilter(john, 1, "John", 0)  
-Api.AdkFirstEx(john, False)  
-from System import String  
-print(Api.AdkGetStr(john, Api.ADK_SUPPLIER_NAME, String("")))  
-Api.AdkSetStr(john, Api.ADK_SUPPLIER_NAME, String("NewName")  
-Api.AdkUpdate(john)  
-```  
-  
-Turn into  
-  
-```py  
-from visma_administration import VismaAPI  
-  
-visma = VismaAPI(common_path, company_path)  
-john = visma.supplier.get(adk_supplier_name="John")  
-print(john.adk_supplier_name)  
-john.adk_supplier_name = "New John"  
-john.save()  
-```  
-  
+    # Retrieve all suppliers that contain DE anywhere in its name - returns a generator  
+    for supplier in api.supplier.filter(adk_supplier_name="*DE*"):  
+     print(supplier.adk_supplier_name)
+     
+    # Create a new record  
+    new_record = api.supplier.new()  
+    new_record.adk_supplier_name = "Nvidia"  
+    new_record.create() # CALL THIS INSTEAD OF .SAVE()  
+      
+    # Get 5 elements  
+    import itertools  
+    suppliers = api.supplier.filter(ADK_SUPPLIER_NAME="*N*")  
+    suppliers = itertools.islice(suppliers, 5)  
+    for supplier in suppliers:  
+     print(supplier.adk_supplier_name)  
+```
+
+# Why is it recommended to only configure one company?
+
+The underlying API is a DLL file, which can only be loaded once per process, and the fact that Vismas API has no direct way to open 
+multiple companies at once.
+I had to choose between complaticating the codebase a lot and try to load the dll in multiple processes for each company, or simply allow one company to be accessed at a time.
+
+The latter works well for me, as we don't have too much requests. Whenever your multithreaded code tries to open two different companies, it will finish all open API's through the context manager (get_company_api) before opening the other company.
+If you for instance have 100 managers open for company A, you need to wait for those to finish before the context manager yields the API for company B. This could be problematic if you make a ton of requests, and could add some major delay.
+
+Therefore it's up to you if you want to configure multiple companies or not.
+
+# Other info
 In Visma's documentation you can find a list of DB_fields that you may access through their API.  
 For instance  
 ```  
@@ -93,18 +77,18 @@ ADK_DB_ is removed and the name is lowercased.
 For example:  
       
 ```py  
-visma = VismaAPI(common_path, company_path)  
-visma.supplier  
-visma.account  
-visma.project  
+with visma.get_company_api("company") as api:
+    api.supplier  
+    api.account  
+    api.project  
 ```  
   
 These DB_Field attributes returns an object from which you can request data  
   
 ```py  
-visma.supplier.get()  # returns a single object or returns an error  
-visma.supplier.filter()  # returns multiple objects  
-visma.supplier.new()  # Gives you a new record  
+api.supplier.get()  # returns a single object or returns an error  
+api.supplier.filter()  # returns multiple objects  
+api.supplier.new()  # Gives you a new record  
 ```
 
 Both `get` and `filter` accepts filtering on a field as argument.
@@ -116,7 +100,7 @@ This filters on the ADK_SUPPLIER_NAME field of ADK_DB_SUPPLIER
 *text* is a valid filter expression which returns a result with inc anywhere inside of the name
 Refer to Visma documentation for further information on how to form different types of filter expressions.
 """
-result = visma.supplier.get(adk_supplier_name="*inc*")
+result = api.supplier.get(adk_supplier_name="*inc*")
 ```
 
 Consider whatever `get`, `filter` and `new` returns to be database record(s).
@@ -130,7 +114,7 @@ ADK_SUPPLIER_SHORT_NAME
 ```
 These fields are mainly used in two ways,
 ```py
-test = visma.supplier.get(adk_supplier_name="test")  # Used when filtering
+test = api.supplier.get(adk_supplier_name="test")  # Used when filtering
 test.adk_supplier_name = "test1"  # Or used when interacting with a supplier record
 ```
  
