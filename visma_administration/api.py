@@ -20,6 +20,7 @@ with OpenKey(
 
 from AdkNet4Wrapper import Api
 
+
 class InvalidFilter(Exception):
     pass
 
@@ -278,12 +279,15 @@ class _Pdata(object):
         hello.save()
     """
 
-    def __init__(self, api, db_name, pdata, parent_pdata=None, is_a_row=False):
+    def __init__(
+        self, api, db_name, pdata, parent_pdata=None, is_a_row=False, row_index=None
+    ):
         object.__setattr__(self, "api", api)
         object.__setattr__(self, "db_name", db_name)
         object.__setattr__(self, "data", pdata)
         object.__setattr__(self, "is_a_row", is_a_row)
         object.__setattr__(self, "parent_pdata", parent_pdata)
+        object.__setattr__(self, "row_index", row_index)
 
     def __del__(self):
         self.api.AdkDeleteStruct(self.data)
@@ -376,7 +380,7 @@ class _Pdata(object):
 
     def delete(self):
         if self.is_a_row:
-            self.api.AdkDeleteRow(self.parent_pdata, self.adk_ooi_row_rownumber)
+            self.api.AdkDeleteRow(self.parent_pdata.data, self.row_index)
             return
         self.api.AdkDeleteRecord(self.data)
 
@@ -392,17 +396,43 @@ class _Pdata(object):
         _existing_rows = []
         for index in range(int(nrows)):
             data = self.api.AdkGetRowData(self.data, index, Int32(0))[1]
-            _existing_rows.append(_Pdata(self.api, _row_db_id, data, parent_pdata=self.data, is_a_row=True))
+            _existing_rows.append(
+                _Pdata(
+                    self.api,
+                    _row_db_id,
+                    data,
+                    parent_pdata=self,
+                    is_a_row=True,
+                    row_index=index + 1,
+                )
+            )
 
         return _existing_rows
 
-    def new_row(self):
+    def create_rows(self, quantity=1):
+        if quantity < 1:
+            raise ValueError("New row quantity must be 1 or higher.")
+
         _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
         _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
         _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
         nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
 
-        _rows = self.api.AdkCreateDataRow(_row_db_id, int(nrows) + 1)
-        self.api.AdkSetDouble(self.data, _nrows_field_id, Double(nrows + 1))
+        _rows = self.api.AdkCreateDataRow(_row_db_id, int(nrows) + quantity)
+        self.api.AdkSetDouble(self.data, _nrows_field_id, Double(nrows + quantity))
         self.api.AdkSetData(self.data, _rows_field_id, _rows)
-        return _Pdata(self.api, _row_db_id, self.api.AdkGetDataRow(_rows, int(nrows) - 1), parent_pdata=self.data, is_a_row=True)
+
+        row_objects = []
+        for index in range(quantity):
+            actual_nrows_index = nrows + index
+            row_objects.append(
+                _Pdata(
+                    self.api,
+                    _row_db_id,
+                    self.api.AdkGetDataRow(_rows, actual_nrows_index),
+                    parent_pdata=self,
+                    row_index=actual_nrows_index,
+                )
+            )
+
+        return row_objects
