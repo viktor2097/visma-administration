@@ -278,10 +278,12 @@ class _Pdata(object):
         hello.save()
     """
 
-    def __init__(self, api, db_name, pdata):
+    def __init__(self, api, db_name, pdata, parent_pdata=None, is_a_row=False):
         object.__setattr__(self, "api", api)
         object.__setattr__(self, "db_name", db_name)
         object.__setattr__(self, "data", pdata)
+        object.__setattr__(self, "is_a_row", is_a_row)
+        object.__setattr__(self, "parent_pdata", parent_pdata)
 
     def __del__(self):
         self.api.AdkDeleteStruct(self.data)
@@ -373,6 +375,9 @@ class _Pdata(object):
         self.api.AdkUpdate(self.data)
 
     def delete(self):
+        if self.is_a_row:
+            self.api.AdkDeleteRow(self.parent_pdata, self.adk_ooi_row_rownumber)
+            return
         self.api.AdkDeleteRecord(self.data)
 
     def create(self):
@@ -387,7 +392,7 @@ class _Pdata(object):
         _existing_rows = []
         for index in range(int(nrows)):
             data = self.api.AdkGetRowData(self.data, index, Int32(0))[1]
-            _existing_rows.append(_Pdata(self.api, _row_db_id, data))
+            _existing_rows.append(_Pdata(self.api, _row_db_id, data, parent_pdata=self.data, is_a_row=True))
 
         return _existing_rows
 
@@ -400,8 +405,4 @@ class _Pdata(object):
         _rows = self.api.AdkCreateDataRow(_row_db_id, int(nrows) + 1)
         self.api.AdkSetDouble(self.data, _nrows_field_id, Double(nrows + 1))
         self.api.AdkSetData(self.data, _rows_field_id, _rows)
-        return _Pdata(self.api, _row_db_id, self.api.AdkGetDataRow(_rows, int(nrows) - 1))
-
-    def delete_row(self, row_index):
-        self.api.AdkDeleteRow(self.data, row_index)
-
+        return _Pdata(self.api, _row_db_id, self.api.AdkGetDataRow(_rows, int(nrows) - 1), parent_pdata=self.data, is_a_row=True)
