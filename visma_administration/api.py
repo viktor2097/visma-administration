@@ -9,7 +9,7 @@ from os import sys
 from winreg import HKEY_LOCAL_MACHINE, OpenKey, QueryValueEx
 
 import clr
-from System import Boolean, DateTime, Double, String
+from System import Boolean, DateTime, Double, String, Int32
 
 with OpenKey(
     HKEY_LOCAL_MACHINE,
@@ -377,3 +377,31 @@ class _Pdata(object):
 
     def create(self):
         self.api.AdkAdd(self.data)
+
+    def rows(self):
+        _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
+        _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
+        _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
+        nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+
+        _existing_rows = []
+        for index in range(int(nrows)):
+            data = self.api.AdkGetRowData(self.data, index, Int32(0))[1]
+            _existing_rows.append(_Pdata(self.api, _row_db_id, data))
+
+        return _existing_rows
+
+    def new_row(self):
+        _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
+        _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
+        _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
+        nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+
+        _rows = self.api.AdkCreateDataRow(_row_db_id, int(nrows) + 1)
+        self.api.AdkSetDouble(self.data, _nrows_field_id, Double(nrows + 1))
+        self.api.AdkSetData(self.data, _rows_field_id, _rows)
+        return _Pdata(self.api, _row_db_id, self.api.AdkGetDataRow(_rows, int(nrows) - 1))
+
+    def delete_row(self, row_index):
+        self.api.AdkDeleteRow(self.data, row_index)
+
