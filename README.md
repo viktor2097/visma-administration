@@ -1,3 +1,4 @@
+
 # *Python Visma Administration*  
 Requires Python executable to be 32-bit to communicate with Visma API.  
 ```  
@@ -6,49 +7,98 @@ pip install visma-administration
   
 # Quick functionality overview  
 Easy integration with Visma Administration through pythonnet and Vismas Adk4NetWrapper.dll  
-```py  
-from visma_administration import Visma  
-from datetime import datetime  
-  
-# Add companies you would like to access
-# It's highly recommended to only use one company, which i'll explain why further down in the readme
-Visma.add_company(name="FTG9", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG9")  
-Visma.add_company(name="FTG10", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")  
 
-# Gets API for FTG10 we added earlier
+### Initialize communication with your database(s)
+```py
+from visma_administration import Visma
+Visma.add_company(name="FTG10", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")
+```
+### Get access to API for a company by calling Visma.get_company_api
+```py
 with Visma.get_company_api("FTG10") as api:
-    # Retrieve a single supplier  
-    john = api.supplier.get(adk_supplier_name="John")  
-      
-    # Print data about john  
-    print(john.adk_supplier_short_name)  
-    print(john.adk_supplier_credit_limit)  
-      
-    # Assign new data to john  
-    john.adk_supplier_short_name = "JN"             # supports string assignments  
-    john.adk_supplier_autogiro = True               # supports boolean assignments  
-    john.adk_supplier_credit_limit = 50000          # supports float and int assignments  
-    john.adk_supplier_timestamp = datetime.now()    # supports date assignments  
-    john.save() # save to the database  
-    
-    # Delete a record
-    john.delete()
-  
-    # Retrieve all suppliers that contain DE anywhere in its name - returns a generator  
-    for supplier in api.supplier.filter(adk_supplier_name="*DE*"):  
-     print(supplier.adk_supplier_name)
-     
-    # Create a new record  
-    new_record = api.supplier.new()  
-    new_record.adk_supplier_name = "Nvidia"  
-    new_record.create() # CALL THIS INSTEAD OF .SAVE()  
-      
-    # Get 5 elements  
-    import itertools  
-    suppliers = api.supplier.filter(ADK_SUPPLIER_NAME="*N*")  
-    suppliers = itertools.islice(suppliers, 5)  
-    for supplier in suppliers:  
-     print(supplier.adk_supplier_name)  
+	pass
+```
+### Get a single record
+```py
+with Visma.get_company_api("FTG10") as api:
+	record = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="number")
+	print(record.adk_sup_inv_head_invoice_number)
+	record.adk_sup_inv_head_invoice_date = datetime.now() # supports date assignments  
+	record.adk_sup_inv_head_vat_amount = 5000 # supports float and int 
+	record.adk_sup_inv_head_paymstop = True # supports boolean assignments 
+	record.adk_sup_inv_head_supplier_name = "Name" # supports string assignments 
+	record.save()
+```
+
+### Get multiple records
+```py
+with Visma.get_company_api("FTG10") as api:
+	invoices = api.supplier_invoice_head.filter(adk_sup_inv_head_invoice_number="f03*")
+	total_sum = 0
+	for invoice in invoices:
+		total_sum += invoice.adk_sup_inv_head_total
+	print(f"Total for all invoices with invoice_number starting as 'f03' is: {total_sum}")
+
+	# filter returns a generator, so you can limit how many items to return
+	import itertools  
+	suppliers = api.supplier.filter(adk_supplier_name="*N*")  
+	suppliers = itertools.islice(suppliers, 5)  
+	for supplier in suppliers:  
+		print(supplier.adk_supplier_name)  
+```
+### Create a record
+```py
+new_record = api.supplier.new() # .new() gives you a fresh object to work with
+new_record.adk_supplier_name = "Nvidia"
+###########################################################
+# Calling .save() instead of .create() when creating an obj
+# can result in some in-memory record being overwritten
+new_record.create() # CALL THIS INSTEAD OF .SAVE()  
+###########################################################
+```
+
+### Delete a record
+```py
+john = api.supplier.get(adk_supplier_name="John")
+john.delete()
+```
+
+## Working with rows.
+Existing rows can easily be accessed with **.rows()** and creating new ones by calling **.create_rows()**
+```py
+with Visma.get_company_api("FTG10") as api:
+	# lets create a new invoice and add rows
+	invoice = api.supplier_invoice_head.new()
+	invoice.adk_sup_inv_head_invoice_number = "50294785"
+	
+	rows = invoice.create_rows(quantity=3) # rows is now a list containg 3 row objects!
+	rows[0].adk_ooi_row_account_number = "5010"
+	rows[1].adk_ooi_row_account_number = "4050"
+	rows[2].adk_ooi_row_account_number = "3020"
+	invoice.create()
+	# Done. We now have a new invoice with 3 rows.
+
+	# Here we can access existing rows
+	for row in invoice.rows():
+		print(row.adk_ooi_row_account_number)
+	
+	# Delete last row
+	# If you would like to delete more than one row,
+	# read the warnings further down on the readme 
+	invoice.rows()[-1].delete()
+	
+	
+```
+
+# Deleting multiple rows
+After **.delete()** is called on a row, Visma automatically reassigns new indexes to every row, therefore according to their documentation, you have to request all rows again to continue working with them.
+```py
+# If you would like to delete all custom rows, use the code snippet below.
+# You have to start deleting them by negative index, since templates
+# will automatically readd rows depending on your configurations
+nrows = invoice.adk_sup_inv_head_nrows  
+for i in range(int(nrows)):  
+  invoice.rows()[-1].delete()
 ```
 
 # Why is it recommended to only configure one company?

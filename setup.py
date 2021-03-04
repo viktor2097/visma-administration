@@ -7,7 +7,7 @@ with open("README.md") as f:
 setup(
     name="visma_administration",
     packages=["visma_administration"],
-    version="0.5.1",
+    version="0.6.0",
     license="MIT",
     description="API for Visma Administration 200/500/1000/2000",
     long_description=long_description,
@@ -15,7 +15,7 @@ setup(
     author="Viktor Johansson",
     author_email="dpedesigns@hotmail.com",
     url="https://github.com/viktor2097/visma-administration",
-    download_url="https://github.com/viktor2097/visma-administration/archive/0.5.1.tar.gz",
+    download_url="https://github.com/viktor2097/visma-administration/archive/0.6.0.tar.gz",
     keywords=["visma"],
     install_requires=["pythonnet>=2.5.1"],
     classifiers=[
