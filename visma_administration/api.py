@@ -111,7 +111,7 @@ class Visma:
     def add_company(cls, name, common_path, company_path, username=None, password=None):
         """
         Adds a company to VismaAPI.companies
-        name of company can be used with get_company_api
+        name is used with .get_company_api()
         """
         if not username or not password:
             login = cls.get_login_credentials()
@@ -126,6 +126,13 @@ class Visma:
         }
 
     def __getattr__(self, name):
+        """
+        Args:
+            name: Name of DB_FIELD, E.g ADK_DB_SUPPLIER name is supplier ( ADK_DB_ is removed, and lowercase letters )
+
+        Returns:
+            A _DBField instance exposing methods for any ADK_DB_FIELD
+        """
         if name in self.available_fields:
             return type(
                 name.title(), (_DBField,), {"DB_NAME": self.available_fields[name]}
@@ -135,6 +142,9 @@ class Visma:
 
     @property
     def api(self):
+        """
+        Returns the Api object defined in DLL and opens a database connection if needed
+        """
         if self.__class__._active_company == self.company["company_path"]:
             return Api
         else:
@@ -157,6 +167,12 @@ class Visma:
 
     @staticmethod
     def get_login_credentials() -> namedtuple:
+        """
+        Finds Visma credentials from visma_username and visma_password environment variables
+
+        Returns:
+            namedtuple containing username and password
+        """
         Credentials = namedtuple("Credentials", ["username", "password"])
 
         try:
@@ -183,6 +199,15 @@ class Visma:
 
 
 class _DBField:
+    """
+    Simple manager for pData.
+    Used to filter and create new objects
+
+    For instance,
+        .filter(field_name="hello") creates a generator and yields a _Pdata object for each iteration
+        .get() returns a single _Pdata object to work with
+        .new() returns an empty _Pdata object
+    """
 
     DB_NAME = None
 
@@ -269,7 +294,7 @@ class _Pdata(object):
     Example:
 
         # hello is an instance of Pdata which data is of type ADK_DB_SUPPLIER
-        hello = visma.supplier.get(ADK_SUPPLIER_NAME="hello")
+        hello = visma.supplier.get(adk_supplier_name="hello")
 
         # Access a field on hello
         hello.adk_supplier_name
@@ -388,6 +413,10 @@ class _Pdata(object):
         self.api.AdkAdd(self.data)
 
     def rows(self):
+        """
+        Returns a list of rows which are of type _Pdata
+        You may access any fields, do assignments and delete rows like any other _Pdata objects
+        """
         _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
         _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
         _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
@@ -410,6 +439,17 @@ class _Pdata(object):
         return _existing_rows
 
     def create_rows(self, quantity=1):
+        """
+        Returns a list containg rows of _Pdata type.
+        Example:
+            rows = invoice.create_rows(2)
+            rows[0].adk_ooi_... = "hello"
+            rows[1].adk_ooi_... = "world"
+            invoice.save()
+
+        Args:
+            quantity: number of rows to create
+        """
         if quantity < 1:
             raise ValueError("New row quantity must be 1 or higher.")
 
