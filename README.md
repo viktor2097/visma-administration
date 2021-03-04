@@ -1,4 +1,6 @@
-
+[![PyPI version](https://badge.fury.io/py/visma-administration.svg)](https://badge.fury.io/py/visma-administration)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/visma-administration)
+![GitHub Release Date](https://img.shields.io/github/release-date/viktor2097/visma-administration)
 # *Python Visma Administration*  
 Requires Python executable to be 32-bit to communicate with Visma API.  
 ```  
