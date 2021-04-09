@@ -401,7 +401,12 @@ class _Pdata(object):
         return type[1]
 
     def save(self):
-        self.api.AdkUpdate(self.data)
+        error = self.api.AdkUpdate(self.data)
+        if error.lRc != self.api.ADKE_OK:
+            error_message = self.api.AdkGetErrorText(
+                error, self.api.ADK_ERROR_TEXT_TYPE.elRc
+            )
+            raise Exception(error_message)
 
     def delete(self):
         if self.is_a_row:
@@ -410,7 +415,12 @@ class _Pdata(object):
         self.api.AdkDeleteRecord(self.data)
 
     def create(self):
-        self.api.AdkAdd(self.data)
+        error = self.api.AdkAdd(self.data)
+        if error.lRc != self.api.ADKE_OK:
+            error_message = self.api.AdkGetErrorText(
+                error, self.api.ADK_ERROR_TEXT_TYPE.elRc
+            )
+            raise Exception(error_message)
 
     def rows(self):
         """
