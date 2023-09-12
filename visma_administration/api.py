@@ -359,7 +359,7 @@ class _Pdata(object):
             error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
             )
-            raise Exception(error_message)
+            raise Exception("field: {}, error: {}".format(key, error_message))
 
     def assignment_types_are_equal(self, field_type, input_type):
         """
