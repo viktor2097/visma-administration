@@ -68,7 +68,7 @@ class Visma:
         requests on a specific company to finish before yielding the object
         """
         if name not in cls.companies:
-            raise AttributeError("Company not found. Consider adding it first.")
+            raise CompanyNotFoundError("Company not found. Consider adding it first.")
 
         instance = cls(company=cls.companies[name])
         company = cls.companies[name]["company_path"]
@@ -137,8 +137,8 @@ class Visma:
             return type(
                 name.title(), (_DBField,), {"DB_NAME": self.available_fields[name]}
             )(api=self.api)
-
-        raise AttributeError
+        else:
+            raise InvalidFieldError(f"{name} is not a valid field.")
 
     @property
     def api(self):
@@ -161,7 +161,7 @@ class Visma:
                 error, Api.ADK_ERROR_TEXT_TYPE.elRc
             )
             logging.error(error_message)
-            sys.exit(1)
+            raise ConnectionError(f"Error connecting to the Visma API: {error_message}")
 
         return Api
 
@@ -183,7 +183,9 @@ class Visma:
                 "provide username and password upon class instantiation,"
                 "or set visma_username & visma_password environment variables"
             )
-            sys.exit(1)
+            raise CredentialError(
+                "Failed to get Visma credentials from environment variables"
+            )
         return Credentials(username=username, password=password)
 
     def db_fields(self):
@@ -239,7 +241,7 @@ class _DBField:
                     self.api.ADK_FIELD_TYPE.eUnused,
                 )
             except AttributeError:
-                raise AttributeError(
+                raise InvalidFieldError(
                     f"{field} is not a valid field of {self.__class__.DB_NAME}"
                 )
 
@@ -252,12 +254,12 @@ class _DBField:
     def new(self):
         return self.pdata
 
-    def get(self, **kwargs):
+    def get(self, include_rows=True, **kwargs):
         """
         Returns a single object, or raises an exception.
         """
         self.set_filter(**kwargs)
-        error = self.api.AdkFirstEx(self.pdata.data, True)
+        error = self.api.AdkFirstEx(self.pdata.data, include_rows)
         if error.lRc != self.api.ADKE_OK:
             error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
@@ -266,7 +268,7 @@ class _DBField:
 
         return self.pdata
 
-    def filter(self, **kwargs):
+    def filter(self, include_rows=True, **kwargs):
         """
         Returns multiple objects with a generator
         """
@@ -277,7 +279,7 @@ class _DBField:
             return
 
         while True:
-            error = self.api.AdkNextEx(self.pdata.data, True).lRc
+            error = self.api.AdkNextEx(self.pdata.data, include_rows).lRc
             if error != self.api.ADKE_OK:
                 break
 
