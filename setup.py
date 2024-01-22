@@ -1,4 +1,5 @@
 import os
+import re
 import setuptools
 from distutils.core import setup
 
