@@ -22,7 +22,12 @@ class CompanyNotFoundError(VismaAPIError):
     pass
 
 
-class CredentialError(VismaAPIError):
+class CredentialsError(VismaAPIError):
     """Exception raised for errors in retrieving credentials."""
+
+    pass
+
+class InvalidFilterError(VismaAPIError):
+    """Exception raised for errors when invalid filter is used."""
 
     pass

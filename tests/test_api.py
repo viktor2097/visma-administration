@@ -1,19 +1,39 @@
+import pytest
+from datetime import datetime
 from uuid import uuid4
 
 from visma_administration.api import Visma
 
 Visma.add_company(name="FTG10", common_path="Z:\\Gemensamma filer", company_path="Z:\\Företag\\FTG10")
 
+@pytest.fixture
+def invoice():
+    """
+    Creates or gets an invoice with invoice number 41cb6edd-2-test
+    """
+    try:
+        with Visma.get_company_api("FTG10") as api:
+            invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="41cb6edd-2-test")
+            yield invoice
+    except:
+        with Visma.get_company_api("FTG10") as api:
+            invoice = api.supplier_invoice_head.new()
+            invoice.adk_sup_inv_head_invoice_number = "41cb6edd-2-test"
+            invoice.adk_sup_inv_head_supplier_name = "Created for test"
+            invoice.adk_sup_inv_head_invoice_date = datetime(2021, 3, 2)
+            invoice.create()
+            yield invoice
+
 def test_getting_invoice_data():
     with Visma.get_company_api("FTG10") as api:
-        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="66666666666666666")
-        assert invoice.adk_sup_inv_head_invoice_number == "66666666666666666"
+        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="41cb6edd-2-test")
+        assert invoice.adk_sup_inv_head_invoice_number == "41cb6edd-2-test"
         assert invoice.adk_sup_inv_head_supplier_name == "Created for test"
         assert str(invoice.adk_sup_inv_head_invoice_date) == "2021-03-02 00:00:00"
 
 def test_create_rows_for_invoice():
     with Visma.get_company_api("FTG10") as api:
-        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="66666666666666666")
+        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="41cb6edd-2-test")
 
         # This might seem odd, but Visma updates the index of all rows when calling .delete() on one.
         # And according to the docs, the correct way to approach this is to get all rows again.
@@ -36,7 +56,7 @@ def test_create_rows_for_invoice():
 
 def test_deleting_random_rows_keeps_other_data_intact():
     with Visma.get_company_api("FTG10") as api:
-        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="66666666666666666")
+        invoice = api.supplier_invoice_head.get(adk_sup_inv_head_invoice_number="41cb6edd-2-test")
 
         # This might seem odd, but Visma updates the index of all rows when calling .delete() on one.
         # And according to the docs, the correct way to approach this is to get all rows again.
@@ -88,7 +108,7 @@ def test_creating_invoice_and_rows():
         rows = invoice.create_rows(quantity=2)
         rows[0].adk_ooi_row_account_number = "8012"
         rows[1].adk_ooi_row_account_number = "5010"
-        invoice.create()
+        invoice.save()
 
         assert invoice.adk_sup_inv_head_invoice_number == generated_uuid
         account_numbers = [row.adk_ooi_row_account_number for row in invoice.rows()]

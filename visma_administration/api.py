@@ -2,28 +2,44 @@
 import logging
 import os
 import time
+import warnings
 from collections import namedtuple
 from contextlib import contextmanager
 from decimal import Decimal
 from os import sys
 from winreg import HKEY_LOCAL_MACHINE, OpenKey, QueryValueEx
 
+from .exceptions import (
+    CompanyNotFoundError,
+    ConnectionError,
+    CredentialsError,
+    InvalidFieldError,
+    InvalidFilterError,
+)
+
+IS_64_BIT = sys.maxsize > 2 ** 32
+REG_PATH = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\SpcsAdm.Exe"
+DLL_NAME_64_BIT = "AdkNet6Wrapper.dll" # NET 6 wrapper is 64 bit
+DLL_NAME_32_BIT = "AdkNet4Wrapper.dll"
+if IS_64_BIT:
+    from pythonnet import load
+    load("coreclr")
+
 import clr
 from System import Boolean, DateTime, Double, String, Int32
 
-with OpenKey(
-    HKEY_LOCAL_MACHINE,
-    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\SpcsAdm.Exe",
-) as key:
-    adk = QueryValueEx(key, "AdkDll")[0]
-    clr.AddReference(adk + "\\AdkNet4Wrapper.dll")
-
-from AdkNet4Wrapper import Api
+with OpenKey(HKEY_LOCAL_MACHINE, REG_PATH) as key:
+    dll_location = QueryValueEx(key, "AdkDll")[0]
 
 
-class InvalidFilter(Exception):
-    pass
+dll_name = DLL_NAME_64_BIT if IS_64_BIT else DLL_NAME_32_BIT
+path = os.path.join(dll_location, dll_name)
+clr.AddReference(path)
 
+if IS_64_BIT:
+    from AdkNetWrapper import Api
+else:
+    from AdkNet4Wrapper import Api
 
 class Visma:
     """
@@ -183,7 +199,7 @@ class Visma:
                 "provide username and password upon class instantiation,"
                 "or set visma_username & visma_password environment variables"
             )
-            raise CredentialError(
+            raise CredentialsError(
                 "Failed to get Visma credentials from environment variables"
             )
         return Credentials(username=username, password=password)
@@ -216,15 +232,14 @@ class _DBField:
     def __init__(self, api):
         self.api = api
         self.pdata = _Pdata(
-            self.api,
-            self.__class__.DB_NAME,
-            self.api.AdkCreateData(getattr(self.api, self.DB_NAME)),
+            api=self.api,
+            db_name=self.__class__.DB_NAME,
+            pdata=self.api.AdkCreateData(getattr(self.api, self.DB_NAME)),
         )
 
     def set_filter(self, **kwargs):
         """
         Apply filter to self.pdata based on filter provided to kwargs.
-        Currently only supports filtering on one field and picks the last provided.
 
         Example:
 
@@ -249,9 +264,15 @@ class _DBField:
                 self.pdata.data, getattr(self.api, field), filter_term, 0
             )
             if error.lRc != self.api.ADKE_OK:
-                raise InvalidFilter
+                raise InvalidFilterError
 
     def new(self):
+        self.pdata = _Pdata(
+            api=self.api,
+            db_name=self.__class__.DB_NAME,
+            pdata=self.api.AdkCreateData(getattr(self.api, self.DB_NAME)),
+            create_new=True
+        )
         return self.pdata
 
     def get(self, include_rows=True, **kwargs):
@@ -307,7 +328,7 @@ class _Pdata(object):
     """
 
     def __init__(
-        self, api, db_name, pdata, parent_pdata=None, is_a_row=False, row_index=None
+        self, *, api, db_name, pdata, create_new=False, parent_pdata=None, is_a_row=False, row_index=None
     ):
         object.__setattr__(self, "api", api)
         object.__setattr__(self, "db_name", db_name)
@@ -315,9 +336,13 @@ class _Pdata(object):
         object.__setattr__(self, "is_a_row", is_a_row)
         object.__setattr__(self, "parent_pdata", parent_pdata)
         object.__setattr__(self, "row_index", row_index)
+        object.__setattr__(self, "create_new", create_new)
 
     def __del__(self):
-        self.api.AdkDeleteStruct(self.data)
+        # Not always a callable for some reason, depending on API version?
+        if callable(self.api.AdkDeleteStruct):
+            self.api.AdkDeleteStruct(self.data)
+
 
     def __getattr__(self, key):
         try:
@@ -330,11 +355,16 @@ class _Pdata(object):
         if _type == self.api.ADK_FIELD_TYPE.eChar:
             return self.api.AdkGetStr(*default_arguments, String(""))[1]
         elif _type == self.api.ADK_FIELD_TYPE.eDouble:
-            return self.api.AdkGetDouble(*default_arguments, Double(0.0))[1]
+            if hasattr(self.api, "AdkGetDouble"):
+                return self.api.AdkGetDouble(*default_arguments, Double(0.0))[1]
+            elif hasattr(self.api, "AdkGetNumeric"):
+                return self.api.AdkGetNumeric(*default_arguments, Double(0.0))[1]
+            else:
+                raise Exception("Neither AdkGetDouble or AdkGetNumeric is available")
         elif _type == self.api.ADK_FIELD_TYPE.eBool:
             return self.api.AdkGetBool(*default_arguments, Boolean(0))[1]
         elif _type == self.api.ADK_FIELD_TYPE.eDate:
-            return self.api.AdkGetDate(*default_arguments, DateTime())[1]
+            return self.api.AdkGetDate(*default_arguments, DateTime(0))[1]
 
     def __setattr__(self, key, value):
         try:
@@ -349,7 +379,7 @@ class _Pdata(object):
 
         error = None
         if _type == self.api.ADK_FIELD_TYPE.eChar:
-            error = self.api.AdkSetStr(*default_arguments, String(f"{value}"))[0]
+            error = self.api.AdkSetStr(*default_arguments, String(f"{value}"))
         elif _type == self.api.ADK_FIELD_TYPE.eDouble:
             error = self.api.AdkSetDouble(*default_arguments, Double(value))
         elif _type == self.api.ADK_FIELD_TYPE.eBool:
@@ -357,6 +387,11 @@ class _Pdata(object):
         elif _type == self.api.ADK_FIELD_TYPE.eDate:
             error = self.api.AdkSetDate(*default_arguments, self.to_date(value))
 
+
+        # Error could be inside a tuple ( first element )
+        # Example: (<AdkNet4Wrapper.ADKERROR object at 0x06F198C8>, 'e6108840-2')
+        if isinstance(error, tuple):
+            error = error[0]
         if error and error.lRc != self.api.ADKE_OK:
             error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
@@ -403,7 +438,10 @@ class _Pdata(object):
         return type[1]
 
     def save(self):
-        error = self.api.AdkUpdate(self.data)
+        if self.create_new:
+            error = self.api.AdkAdd(self.data)
+        else:
+            error = self.api.AdkUpdate(self.data)
         if error.lRc != self.api.ADKE_OK:
             error_message = self.api.AdkGetErrorText(
                 error, self.api.ADK_ERROR_TEXT_TYPE.elRc
@@ -417,6 +455,7 @@ class _Pdata(object):
         self.api.AdkDeleteRecord(self.data)
 
     def create(self):
+        warnings.warn("create is deprecated, use save instead", DeprecationWarning, stacklevel=2)
         error = self.api.AdkAdd(self.data)
         if error.lRc != self.api.ADKE_OK:
             error_message = self.api.AdkGetErrorText(
@@ -432,16 +471,22 @@ class _Pdata(object):
         _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
         _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
         _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
-        nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+        if hasattr(self.api, "AdkGetDouble"):
+            nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+        elif hasattr(self.api, "AdkGetNumeric"):
+            nrows = self.api.AdkGetNumeric(self.data, _nrows_field_id, Double(0.0))[1]
+        else:
+            raise Exception("Neither AdkGetDouble or AdkGetNumeric is available")
+        
 
         _existing_rows = []
         for index in range(int(nrows)):
             data = self.api.AdkGetRowData(self.data, index, Int32(0))[1]
             _existing_rows.append(
                 _Pdata(
-                    self.api,
-                    _row_db_id,
-                    data,
+                    api=self.api,
+                    db_name=_row_db_id,
+                    pdata=data,
                     parent_pdata=self,
                     is_a_row=True,
                     row_index=index + 1,
@@ -468,7 +513,12 @@ class _Pdata(object):
         _row_db_id = self.api.AdkGetRowDataId(self.data, Int32(0))[1]
         _nrows_field_id = self.api.AdkGetNrowsFieldId(self.data, Int32(0))[1]
         _rows_field_id = self.api.AdkGetRowsFieldId(self.data, Int32(0))[1]
-        nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+        if hasattr(self.api, "AdkGetDouble"):
+            nrows = self.api.AdkGetDouble(self.data, _nrows_field_id, Double(0.0))[1]
+        elif hasattr(self.api, "AdkGetNumeric"):
+            nrows = self.api.AdkGetNumeric(self.data, _nrows_field_id, Double(0.0))[1]
+        else:
+            raise Exception("Neither AdkGetDouble or AdkGetNumeric is available")
 
         _rows = self.api.AdkCreateDataRow(_row_db_id, int(nrows) + quantity)
         self.api.AdkSetDouble(self.data, _nrows_field_id, Double(nrows + quantity))
@@ -476,12 +526,12 @@ class _Pdata(object):
 
         row_objects = []
         for index in range(quantity):
-            actual_nrows_index = nrows + index
+            actual_nrows_index = int(nrows) + index
             row_objects.append(
                 _Pdata(
-                    self.api,
-                    _row_db_id,
-                    self.api.AdkGetDataRow(_rows, actual_nrows_index),
+                    api=self.api,
+                    db_name=_row_db_id,
+                    pdata=self.api.AdkGetDataRow(_rows, actual_nrows_index),
                     parent_pdata=self,
                     row_index=actual_nrows_index,
                 )
